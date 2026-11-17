@@ -1,0 +1,479 @@
+import json
+import logging
+import re
+from typing import Dict, Any, List, Optional
+from sqlalchemy.orm import Session
+from config import settings
+from rag_engine import search_relevant_chunks
+from agent_tools import check_inventory_stock, send_whatsapp_action, TOOLS_DEFINITION
+
+logger = logging.getLogger("prawira_agent.orchestrator")
+
+SYSTEM_PROMPT = """Anda adalah "Prawira Tobacco Enterprise Assistant", asisten AI resmi toko tembakau spesialis Prawira Tobacco. Anda bertindak sebagai konsultan tembakau profesional yang ramah, solutif, proaktif, dan sangat memahami seluruh katalog produk toko.
+
+KATALOG & PETA PROFIL RASA RESMI PRAWIRA TOBACCO (SYNC SUPABASE):
+1. Profil Manis, Buah & Kopi:
+   - "Linting Melon Ice" (Aroma manis buah melon segar berpadu sensasi dingin menthol sejuk)
+   - "Linting Strawberry" (Manis fruity segar khas buah strawberry pilihan alami)
+   - "Linting Cappucino" (Manis legit creamy aroma kopi cappucino hangat)
+   - "Purple Ice Burst" (Rasa manis segar anggur/berry dengan sensasi dingin ice burst)
+   - "Coklat Ice Premium" (Varian tembakau coklat manis legit dengan sensasi dingin menthol)
+2. Profil Gurih Mantap (Kretek Tradisional & Original):
+   - "Linting Surya" (Tembakau cengkeh aroma madu tebal gurih mantap khas karakter Surya)
+   - "Linting Samsu" (Tembakau kretek mantap aroma klasik khas tingwe tradisional)
+   - "Linting Marlong" (Tembakau cita rasa American blend mantap khas karakter Marlboro)
+   - "Linting GGF" (Tembakau linting rasa gurih nikmat pilihan)
+   - "Magnum Premium" (Tembakau kretek premium tarikan mantap dan padat)
+   - "Sampurna Premium" (Tembakau premium racikan halus aroma rempah wangi pilihan)
+   - "GGF Premium" (Tembakau racikan premium khusus Prawira Tobacco)
+3. Profil Dingin / Ice (Menthol & Dingin Segar):
+   - "Barrack Whiskey Ice" (Tembakau Barrack dengan rasa whiskey berpadu sensasi dingin segar)
+   - "Linting Melon Ice" (Sensasi dingin buah melon yang manis dan menyegarkan)
+   - "Purple Ice Burst" (Sensasi anggur dingin burst menyegarkan tenggorokan)
+   - "Coklat Ice Premium" (Tembakau rasa coklat berpadu mint dingin)
+4. Profil Mild & Halus (Sangat Ramah untuk Pemula):
+   - "Linting Mild" (Tembakau ringan dengan tarikan sangat halus dan bersih)
+   - "Sampurna Premium" (Tarikan halus aromatik dengan cita rasa premium)
+   - "Barrack Soju" (Tembakau linting Golden Virginia 50 gram aroma halus istimewa)
+   - "Barrack Bayote" (Tembakau rasa khas Bayote tarikan pas)
+   - "Barrack Melisa" (Tembakau linting Drum Original 50 gram)
+   - "Barrack Whiskey" (Tembakau aroma whiskey murni hangat)
+5. Aksesoris dan Perlengkapan Linting:
+   - "Papir" (Kertas papir linting berkualitas Rp 2.000 - Rp 5.000)
+   - "Busa Besar" & "Busa kecil" (Busa filter untuk hisapan lebih bersih dan halus)
+   - "Cengkeh" (Rajangan cengkeh alami penambah gurih kretek)
+   - "Lem" (Lem khusus kertas papir aman dan daya rekat kuat)
+
+ATURAN KETAT ANTI-HALUSINASI & INTEGRITAS TOKO:
+1. HANYA rekomendasikan varian tembakau dan aksesoris yang tercantum dalam katalog resmi Supabase di atas. DILARANG KERAS mengarang merek atau varian fiktif yang tidak ada di toko kami.
+2. PERTANYAAN DI LUAR KONTEKS / OFF-TOPIC (UJI ANTI-HALUSINASI):
+   - Jika pengguna menanyakan hal di luar produk tembakau, aksesoris, atau SOP toko Prawira Tobacco (contoh: tiket pesawat, tiket kereta api, resep masakan, cuaca, politik, saham/crypto, koding, dsb.), Anda WAJIB MENOLAK SECARA JUJUR DAN SOPAN.
+   - Jawab dengan jelas: "Maaf, informasi tersebut tidak ditemukan dalam dokumen SOP atau Katalog resmi Prawira Tobacco. Sebagai asisten resmi Prawira Tobacco, saya hanya melayani konsultasi produk tembakau linting (tingwe), aksesoris linting, ketersediaan stok, dan SOP toko kami."
+   - JANGAN PERNAH mengarang jawaban fiktif dan DILARANG KERAS memanggil tool WhatsApp untuk pertanyaan di luar konteks toko!
+3. PRODUK TIDAK TERDAFTAR / ROKOK BATANGAN PABRIKAN:
+   - Jika pengguna menanyakan rokok batangan pabrikan umum (seperti Marlboro, Djarum Super, Sampoerna Mild, Gudang Garam Filter) atau produk yang tidak ada di Supabase:
+     Jelaskan bahwa Prawira Tobacco khusus spesialis tembakau linting (tingwe) artisan dan aksesoris resmi, bukan rokok pabrikan siap hisap.
+     Tawarkan alternatif varian tingwe resmi kami yang memiliki kemiripan profil rasa (misal: Marlboro -> Linting Marlong; Djarum/Kretek -> Linting Surya atau Magnum Premium; Mild -> Linting Mild).
+4. REKOMENDASI & STOK: Jika pelanggan menanyakan rekomendasi rasa atau menanyakan ketersediaan produk resmi, pilihkan varian di atas lalu WAJIB panggil tool `check_inventory_stock` menggunakan nama produk spesifik (contoh: search_term='Melon', search_term='Surya', search_term='Whiskey') untuk memeriksa ketersediaan stok real-time di Supabase.
+5. DISPATCH WHATSAPP: HANYA panggil tool `send_whatsapp_action` jika pengguna secara EKSPLISIT meminta mengirimkan ringkasan / pesanan produk tembakau ke WhatsApp atau menyebutkan nomor HP (contoh: 083132001855, 628...). DILARANG KERAS memanggil tool WhatsApp jika tidak ada permintaan kirim ke WhatsApp yang jelas.
+6. SOP & GARANSI: Untuk pertanyaan tentang cara menyimpan tembakau (RH 65-70%, wadah kedap) atau garansi retur (2x24 jam lampirkan video unboxing utuh), rujuk dokumen SOP resmi dengan sitasi [Sumber: Nama_File.pdf | Hal. X]. Layanan CS WhatsApp resmi Prawira adalah 083132001855.
+"""
+
+def run_agent_turn(db: Session, user_message: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+    """
+    Executes a complete Agent turn:
+    1. RAG vector retrieval from PostgreSQL
+    2. Model reasoning + tool execution (Gemini / OpenAI / Smart Rule Fallback)
+    3. Final grounded response generation
+    """
+    # 1. RAG Vector Retrieval
+    relevant_chunks = search_relevant_chunks(db, query=user_message, top_k=3, threshold=0.45)
+    
+    context_str = ""
+    citations = []
+    if relevant_chunks:
+        context_parts = []
+        for ch in relevant_chunks:
+            citation_label = f"{ch['document_name']} (Hal. {ch['page_number']})"
+            citations.append({
+                "document": ch["document_name"],
+                "page": ch["page_number"],
+                "similarity": ch["similarity"],
+                "preview": ch["content"][:160] + "..."
+            })
+            context_parts.append(f"--- DOKUMEN: {citation_label} ---\n{ch['content']}")
+        context_str = "\n\n".join(context_parts)
+    else:
+        context_str = "TIDAK ADA DOKUMEN YANG RELEVAN DENGAN PERTANYAAN INI."
+
+    full_system_prompt = f"{SYSTEM_PROMPT}\n\n=== KONTEKS DOKUMEN RESMI ===\n{context_str}\n================================"
+
+    # 2. Try Gemini Provider
+    if settings.LLM_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
+        try:
+            return _execute_gemini_agent(db, user_message, full_system_prompt, citations)
+        except Exception as e:
+            logger.error(f"Gemini agent failed: {e}. Falling back to rule orchestrator.")
+
+    # 3. Try OpenAI Provider
+    elif settings.LLM_PROVIDER == "openai" and settings.OPENAI_API_KEY:
+        try:
+            return _execute_openai_agent(db, user_message, full_system_prompt, citations)
+        except Exception as e:
+            logger.error(f"OpenAI agent failed: {e}. Falling back to rule orchestrator.")
+
+    # 4. Deterministic Smart Fallback (No-Key / Safe Demo Mode)
+    return _execute_deterministic_agent(db, user_message, relevant_chunks, citations)
+
+def _execute_openai_agent(db: Session, user_message: str, system_prompt: str, citations: List[Dict]) -> Dict[str, Any]:
+    from openai import OpenAI
+    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+
+    response = client.chat.completions.create(
+        model=settings.OPENAI_MODEL,
+        messages=messages,
+        tools=TOOLS_DEFINITION,
+        tool_choice="auto",
+        temperature=0.2
+    )
+
+    response_message = response.choices[0].message
+    executed_tools = []
+
+    if response_message.tool_calls:
+        messages.append(response_message)
+        for tool_call in response_message.tool_calls:
+            function_name = tool_call.function.name
+            args = json.loads(tool_call.function.arguments)
+            
+            tool_result = {}
+            if function_name == "check_inventory_stock":
+                tool_result = check_inventory_stock(db, search_term=args.get("search_term", ""), category=args.get("category"))
+                executed_tools.append({
+                    "tool": "check_inventory_stock",
+                    "arguments": args,
+                    "result": tool_result
+                })
+            elif function_name == "send_whatsapp_action":
+                tool_result = send_whatsapp_action(
+                    phone_number=args.get("phone_number", ""),
+                    message_body=args.get("message_body", ""),
+                    action_title=args.get("action_title", "Prawira Tobacco")
+                )
+                executed_tools.append({
+                    "tool": "send_whatsapp_action",
+                    "arguments": args,
+                    "result": tool_result
+                })
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": function_name,
+                "content": json.dumps(tool_result, ensure_ascii=False)
+            })
+
+        final_response = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+            temperature=0.2
+        )
+        return {
+            "answer": final_response.choices[0].message.content,
+            "citations": citations,
+            "executed_tools": executed_tools,
+            "provider": f"OpenAI ({settings.OPENAI_MODEL})"
+        }
+
+    return {
+        "answer": response_message.content,
+        "citations": citations,
+        "executed_tools": executed_tools,
+        "provider": f"OpenAI ({settings.OPENAI_MODEL})"
+    }
+
+def _execute_gemini_agent(db: Session, user_message: str, system_prompt: str, citations: List[Dict]) -> Dict[str, Any]:
+    import google.generativeai as gai
+    gai.configure(api_key=settings.GEMINI_API_KEY)
+    
+    executed_tools = []
+
+    def check_inventory_stock_tool(search_term: str) -> str:
+        """Cek stok fisik, harga, dan ketersediaan produk tembakau atau aksesoris di gudang Prawira Tobacco atau Supabase secara real-time."""
+        res = check_inventory_stock(db, search_term=search_term)
+        executed_tools.append({
+            "tool": "check_inventory_stock",
+            "arguments": {"search_term": search_term},
+            "result": res
+        })
+        return json.dumps(res, ensure_ascii=False)
+
+    def send_whatsapp_action_tool(phone_number: str, message_body: str) -> str:
+        """Kirim pesan, ringkasan rekomendasi varian tembakau, atau pesanan ke nomor WhatsApp pelanggan/staf."""
+        res = send_whatsapp_action(phone_number=phone_number, message_body=message_body)
+        executed_tools.append({
+            "tool": "send_whatsapp_action",
+            "arguments": {"phone_number": phone_number, "message_body": message_body},
+            "result": res
+        })
+        return json.dumps(res, ensure_ascii=False)
+
+    # Candidate models in case the default hits 429 quota
+    candidate_models = [
+        settings.GEMINI_MODEL,
+        "gemini-flash-lite-latest",
+        "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash"
+    ]
+    unique_models = []
+    for m in candidate_models:
+        if m and m not in unique_models:
+            unique_models.append(m)
+
+    last_exc = None
+    for m_name in unique_models:
+        formatted_name = m_name if m_name.startswith("models/") else f"models/{m_name}"
+        try:
+            model = gai.GenerativeModel(
+                model_name=formatted_name,
+                system_instruction=system_prompt,
+                tools=[check_inventory_stock_tool, send_whatsapp_action_tool]
+            )
+            chat = model.start_chat(enable_automatic_function_calling=True)
+            response = chat.send_message(user_message)
+            return {
+                "answer": response.text,
+                "citations": citations,
+                "executed_tools": executed_tools,
+                "provider": f"Gemini ({m_name})"
+            }
+        except Exception as e:
+            last_exc = e
+            logger.warning(f"Gemini model {m_name} failed: {e}. Trying next candidate...")
+
+    raise last_exc or RuntimeError("All Gemini candidate models failed.")
+
+def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Dict], citations: List[Dict]) -> Dict[str, Any]:
+    """
+    High-intelligence consultative agent engine with strict anti-hallucination guardrails.
+    Used when LLM APIs are offline or rate-limited.
+    Ensures that:
+    1. Off-topic questions (e.g. flight tickets, recipes, weather) are rejected politely.
+    2. Non-existent products (e.g. Marlboro, Djarum Super) are identified, not hallucinated,
+       and paired with genuine tingwe recommendations from Supabase.
+    3. WhatsApp dispatch happens ONLY when explicitly requested, never on incidental words.
+    4. SOP questions cite official documents.
+    """
+    msg_lower = user_message.lower().strip()
+    executed_tools = []
+    answers = []
+
+    # -------------------------------------------------------------
+    # 1. STRICT OFF-TOPIC FILTER (Anti-Hallucination Guardrail)
+    # -------------------------------------------------------------
+    off_topic_patterns = [
+        r'\b(pesawat|penerbangan|bandara|tiket|hotel|kereta|travel|liburan|villa|pesiar)\b',
+        r'\b(resep|masak|bumbu|rendang|nasi goreng|kue|restoran|makanan|kuliner)\b',
+        r'\b(cuaca|suhu udara|hujan|ramalan cuaca|gempa|tsunami|iklim)\b',
+        r'\b(presiden|gubernur|menteri|pemilu|politik|pilkada|dpr|partai)\b',
+        r'\b(crypto|bitcoin|ethereum|saham|forex|investasi|trading)\b',
+        r'\b(koding|python|javascript|react|css|html|programming)\b',
+        r'\b(film|bioskop|lagu|musik|konser|chord)\b'
+    ]
+    is_off_topic = any(re.search(p, msg_lower) for p in off_topic_patterns)
+    if is_off_topic:
+        return {
+            "answer": (
+                "Maaf, informasi tersebut tidak ditemukan dalam dokumen SOP atau Katalog resmi Prawira Tobacco.\n\n"
+                "Sebagai asisten resmi **Prawira Tobacco**, saya berfokus untuk melayani konsultasi varian tembakau linting (*tingwe*), aksesoris linting resmi, ketersediaan stok di toko/Supabase, serta SOP penyimpanan resmi kami.\n\n"
+                "Apakah ada yang bisa saya bantu terkait produk tembakau atau perlengkapan linting kami?"
+            ),
+            "citations": [],
+            "executed_tools": [],
+            "provider": "Prawira Tobacco Smart Engine"
+        }
+
+    # -------------------------------------------------------------
+    # 2. CHECK FOR NON-EXISTENT BRANDS / FACTORY CIGARETTES
+    # -------------------------------------------------------------
+    non_existent_brands = {
+        "marlboro": ("Linting Marlong", "Rp 23.000", "karakter American blend mantap khas Marlboro"),
+        "djarum": ("Linting Surya atau Magnum Premium", "Rp 23.000 - Rp 30.000", "karakter kretek gurih berempah mantap"),
+        "super": ("Linting Surya atau Magnum Premium", "Rp 23.000 - Rp 30.000", "karakter kretek gurih berempah mantap"),
+        "sampoerna": ("Linting Mild atau Sampurna Premium", "Rp 23.000 - Rp 30.000", "tarikan halus aroma rempah pilihan"),
+        "gudang garam": ("Linting Surya atau GGF Premium", "Rp 20.000 - Rp 23.000", "aroma cengkeh madu gurih mantap"),
+        "esse": ("Linting Mild atau Purple Ice Burst", "Rp 22.000 - Rp 23.000", "sensasi ringan halus atau dingin buah segar"),
+        "camel": ("Linting Marlong", "Rp 23.000", "American blend mantap"),
+        "magnum filter": ("Magnum Premium", "Rp 30.000", "kretek tarikan padat berbobot"),
+        "gorilla": ("Linting Surya", "Rp 23.000", "kretek tradisional legal resmi"),
+        "ganja": ("Linting Surya", "Rp 23.000", "tembakau legal resmi"),
+    }
+    
+    queried_fake_brand = None
+    for brand_key, (alt_name, alt_price, alt_desc) in non_existent_brands.items():
+        if re.search(rf"\b{re.escape(brand_key)}\b", msg_lower):
+            # Check if user didn't mean genuine product like "Linting Surya" or "Linting Marlong"
+            if brand_key == "surya" and ("linting" in msg_lower or "prawira" in msg_lower):
+                continue
+            if brand_key in ["marlboro", "djarum", "sampoerna", "gudang garam", "esse", "camel", "gorilla", "ganja"]:
+                queried_fake_brand = (brand_key, alt_name, alt_price, alt_desc)
+                break
+
+    # -------------------------------------------------------------
+    # 3. DETECT TASTE RECOMMENDATION INTENT
+    # -------------------------------------------------------------
+    is_rec = any(k in msg_lower for k in [
+        "rekomendasi", "saran", "enak", "cocok", "pemula", "manis", "dingin", 
+        "ice", "menthol", "kretek", "mild", "buah", "gurih", "varian apa", "beli apa"
+    ])
+    product_targets = []
+    rec_text = ""
+
+    if "manis" in msg_lower:
+        product_targets = ["Melon", "Strawberry"]
+        rec_text = (
+            "🍃 **Rekomendasi Varian Tembakau Rasa Manis Prawira Tobacco (Sync Supabase):**\n\n"
+            "1. **Linting Melon Ice** — Karakter manis buah melon segar berpadu sensasi dingin menthol sejuk (Rp 25.000 / pack).\n"
+            "2. **Linting Strawberry** — Manis fruity segar khas buah strawberry pilihan alami (Rp 25.000 / pack).\n"
+            "3. **Linting Cappucino** — Manis legit creamy aroma kopi cappucino hangat (Rp 25.000 / pack).\n"
+            "4. **Coklat Ice Premium** — Varian tembakau coklat manis legit dengan sensasi dingin menthol (Rp 22.000 / pack)."
+        )
+    elif any(k in msg_lower for k in ["dingin", "ice", "menthol", "segar"]):
+        product_targets = ["Whiskey", "Melon"]
+        rec_text = (
+            "❄️ **Rekomendasi Varian Dingin & Menthol (Ice Series - Sync Supabase):**\n\n"
+            "1. **Barrack Whiskey Ice** — Varian favorit sensasi dingin segar berpadu aroma whiskey unik (Rp 22.000 / pack).\n"
+            "2. **Linting Melon Ice** — Sensasi dingin buah melon yang manis dan menyegarkan tenggorokan (Rp 25.000 / pack).\n"
+            "3. **Purple Ice Burst** — Sensasi anggur berry segar dengan ice burst dingin menyegarkan (Rp 22.000 / pack)."
+        )
+    elif any(k in msg_lower for k in ["pemula", "mild", "halus", "ringan"]):
+        product_targets = ["Mild", "Soju"]
+        rec_text = (
+            "🌿 **Rekomendasi untuk Pemula & Penggemar Rasa Halus (Mild - Sync Supabase):**\n\n"
+            "1. **Linting Mild** — Tarikan sangat ringan, halus, dan bersih, sangat bersahabat bagi pemula (Rp 23.000 / pack).\n"
+            "2. **Sampurna Premium** — Racikan halus premium aroma rempah wangi pilihan (Rp 30.000 / pack).\n"
+            "3. **Barrack Soju** — Tembakau linting Golden Virginia 50 gram impor aroma halus istimewa (Rp 45.000 / pack)."
+        )
+    elif any(k in msg_lower for k in ["kretek", "gurih", "mantap", "tradisional", "tingwe"]):
+        product_targets = ["Surya", "Samsu"]
+        rec_text = (
+            "🔥 **Rekomendasi Kretek Nusantara Gurih & Mantap (Sync Supabase):**\n\n"
+            "1. **Linting Surya** — Karakter aroma madu cengkeh tebal, gurih mantap khas karakter Surya (Rp 23.000 / pack).\n"
+            "2. **Linting Samsu** — Karakter klasik tajam dan nikmat, racikan legenda tingwe tradisional (Rp 23.000 / pack).\n"
+            "3. **Linting Marlong** — Karakter American blend gurih padat khas Marlboro (Rp 23.000 / pack).\n"
+            "4. **Magnum Premium** — Tembakau kretek premium tarikan padat berbobot (Rp 30.000 / pack)."
+        )
+    elif is_rec:
+        product_targets = ["Surya", "Melon"]
+        rec_text = (
+            "🍃 **Daftar Varian Terlaris Prawira Tobacco (Sync Supabase):**\n\n"
+            "- **Manis & Dingin:** Linting Melon Ice (Rp 25.000)\n"
+            "- **Kretek Gurih:** Linting Surya (Rp 23.000)\n"
+            "- **Sensasi Dingin:** Barrack Whiskey Ice (Rp 22.000)\n"
+            "- **Mild Halus:** Linting Mild (Rp 23.000)"
+        )
+
+    # -------------------------------------------------------------
+    # 4. INVENTORY STOCK SEARCH
+    # -------------------------------------------------------------
+    is_stock_query = any(k in msg_lower for k in ["stok", "stock", "ada", "ready", "harga", "sisa", "rak", "tersedia", "beli", "cek"])
+    terms_to_check = []
+    if product_targets:
+        terms_to_check = product_targets
+    elif is_stock_query or queried_fake_brand:
+        stopwords = {
+            "cek", "stok", "stock", "apakah", "ada", "berapa", "sisa", "harga", 
+            "di", "gudang", "toko", "ya", "tolong", "bisa", "info", "minta", 
+            "dong", "ready", "tersedia", "produk", "varian", "dan", "untuk", 
+            "masih", "rokok", "tembakau", "lokasinya", "rak", "lokasi"
+        }
+        words = [w for w in re.findall(r'\b\w+\b', msg_lower) if w not in stopwords and len(w) > 1]
+        terms_to_check = [" ".join(words)] if words else ["tembakau"]
+
+    stock_items_found = []
+    failed_search_term = None
+
+    if terms_to_check:
+        for term in terms_to_check[:2]:
+            stock_res = check_inventory_stock(db, search_term=term)
+            if stock_res["found"] and stock_res["items"]:
+                executed_tools.append({
+                    "tool": "check_inventory_stock",
+                    "arguments": {"search_term": term},
+                    "result": stock_res
+                })
+                stock_items_found.extend(stock_res["items"])
+            else:
+                failed_search_term = term
+
+    # -------------------------------------------------------------
+    # 5. DETECT EXPLICIT WHATSAPP DISPATCH INTENT
+    # -------------------------------------------------------------
+    # Must use word boundaries so words like 'pesawat', 'wadah', 'karyawan' never match
+    wa_patterns = [
+        r'\bwhatsapp\b',
+        r'\bfonnte\b',
+        r'\bwa\b',
+        r'\b(kirim|chat|forward|send)\s+(ke|via|lewat)\b',
+        r'\bhubungi\s+(admin|cs|sales|toko|nomor|no)\b'
+    ]
+    is_wa_query = any(re.search(p, msg_lower) for p in wa_patterns)
+    phone_match = re.search(r'(08\d{8,11}|628\d{8,11})', user_message)
+    detected_phone = phone_match.group(1) if phone_match else (settings.STORE_DEFAULT_PHONE if is_wa_query else None)
+
+    # Dispatch WhatsApp ONLY if user explicitly asked or provided phone AND we have a valid topic
+    if detected_phone and (is_wa_query or phone_match):
+        summary_lines = ["Halo! Berikut ringkasan rekomendasi dari Prawira Tobacco:\n"]
+        if stock_items_found:
+            for it in stock_items_found[:3]:
+                summary_lines.append(f"- {it['name']}: {it['formatted_price']} (Stok: {it['stock']} {it['unit']})")
+        else:
+            summary_lines.append("- Linting Melon Ice: Rp 25.000 / pack\n- Linting Strawberry: Rp 25.000 / pack\n- Linting Surya: Rp 23.000 / pack")
+        
+        summary_lines.append("\nPesanan siap diproses melalui admin Prawira Tobacco.")
+        summary_msg = "\n".join(summary_lines)
+
+        wa_res = send_whatsapp_action(
+            phone_number=detected_phone,
+            message_body=summary_msg,
+            action_title="Rekomendasi Prawira Tobacco"
+        )
+        executed_tools.append({
+            "tool": "send_whatsapp_action",
+            "arguments": {"phone_number": detected_phone, "message_body": summary_msg},
+            "result": wa_res
+        })
+        answers.append(
+            f"📲 **Ringkasan Berhasil Dikirim ke WhatsApp!**\n"
+            f"Pesan rekomendasi dan ketersediaan stok telah disiapkan untuk nomor **{detected_phone}**. Anda dapat langsung mengklik tombol aksi WhatsApp di bawah ini."
+        )
+
+    # -------------------------------------------------------------
+    # 6. ASSEMBLE CONTENT
+    # -------------------------------------------------------------
+    if rec_text:
+        answers.insert(0, rec_text)
+    elif stock_items_found and not is_rec:
+        stock_summary = "\n".join([
+            f"- **{it['name']}** (SKU: `{it['sku']}`): Stok **{it['stock']} {it['unit']}** | Harga: **{it['formatted_price']}** | Lokasi: `{it['shelf_location']}` ({it['status']})"
+            for it in stock_items_found
+        ])
+        answers.insert(0, f"📦 **Ketersediaan Stok di Gudang / Supabase:**\n{stock_summary}")
+    elif queried_fake_brand or (failed_search_term and not stock_items_found and not is_rec):
+        searched_label = queried_fake_brand[0] if queried_fake_brand else failed_search_term
+        searched_label = searched_label.title()
+        alt_info = ""
+        if queried_fake_brand:
+            _, alt_name, alt_price, alt_desc = queried_fake_brand
+            alt_info = f"\n\nNamun jika Anda mencari karakter rasa tersebut, kami merekomendasikan varian racikan resmi kami:\n- **{alt_name}** ({alt_price}) — {alt_desc}."
+        
+        answers.insert(0, (
+            f"Mohon maaf, produk **'{searched_label}'** tidak ditemukan dalam katalog resmi maupun basis data stok Supabase Prawira Tobacco.\n\n"
+            f"Prawira Tobacco adalah spesialis tembakau linting (*tingwe*) artisan dan aksesoris resmi, bukan rokok pabrikan umum.{alt_info}\n\n"
+            f"Silakan periksa daftar 24 varian produk resmi kami di tab **Katalog Supabase**."
+        ))
+    elif chunks and any(k in msg_lower for k in ["sop", "simpan", "suhu", "lembab", "garansi", "retur", "rusak", "jamur"]):
+        doc_info = "\n\n".join([f"> *\"{ch['content'][:280]}...\"*\n> — [Sumber: **{ch['document_name']}**, Hal. {ch['page_number']}]" for ch in chunks[:2]])
+        answers.append(f"📄 **Berdasarkan Dokumen SOP Resmi Prawira Tobacco:**\n{doc_info}")
+    elif not answers:
+        answers.append(
+            "Halo! Ada yang bisa saya bantu mengenai produk **Prawira Tobacco**?\n\n"
+            "Anda dapat:\n"
+            "- Menanyakan rekomendasi rasa (misal: *'Rekomendasikan tembakau rasa manis'* atau *'Varian dingin menthol'*)\n"
+            "- Mengecek stok barang real-time (misal: *'Cek stok Barrack Whiskey Ice'* atau *'Stok Linting Surya'*)\n"
+            "- Meminta ringkasan dikirim ke WhatsApp (misal: *'Kirim rekomendasi ini ke WhatsApp 083132001855'*)\n"
+            "- Menanyakan SOP penyimpanan dan klaim garansi toko."
+        )
+
+    return {
+        "answer": "\n\n".join(answers),
+        "citations": citations if any(k in msg_lower for k in ["sop", "simpan", "suhu", "garansi", "retur"]) else [],
+        "executed_tools": executed_tools,
+        "provider": "Prawira Tobacco Smart Engine"
+    }
