@@ -42,6 +42,65 @@ def on_startup():
     except Exception as e:
         logger.warning(f"Auto-sync from Supabase at startup skipped: {e}")
 
+    # Auto-seed sample PDF documents if document chunks are empty
+    try:
+        from database import SessionLocal
+        db = SessionLocal()
+        chunk_count = db.query(DocumentChunk).count()
+        if chunk_count == 0:
+            logger.info("No documents in database. Auto-ingesting sample PDFs...")
+            sample_candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "sample_documents"),
+                os.path.join(os.path.dirname(__file__), "sample_documents"),
+                os.path.abspath("sample_documents")
+            ]
+            for s_dir in sample_candidates:
+                if os.path.exists(s_dir):
+                    for fname in os.listdir(s_dir):
+                        if fname.lower().endswith(".pdf"):
+                            fpath = os.path.join(s_dir, fname)
+                            with open(fpath, "rb") as f:
+                                cnt = ingest_pdf_to_db(db, f.read(), fname)
+                                logger.info(f"Auto-ingested {cnt} chunks from '{fname}'.")
+                    break
+        db.close()
+    except Exception as e:
+        logger.warning(f"Auto-ingest sample docs skipped: {e}")
+
+@app.get("/api/debug-status")
+def debug_status():
+    """Provides diagnostic status for production verification."""
+    from database import SessionLocal
+    db = SessionLocal()
+    prod_cnt = db.query(Product).count()
+    chunk_cnt = db.query(DocumentChunk).count()
+    db.close()
+
+    gemini_key_set = bool(settings.GEMINI_API_KEY and len(settings.GEMINI_API_KEY) > 5)
+    key_preview = f"{settings.GEMINI_API_KEY[:4]}...{settings.GEMINI_API_KEY[-4:]}" if gemini_key_set else "NOT_SET"
+
+    gemini_test_result = "not_tested"
+    try:
+        if gemini_key_set:
+            import google.generativeai as gai
+            gai.configure(api_key=settings.GEMINI_API_KEY)
+            m = gai.GenerativeModel("models/gemini-flash-lite-latest")
+            res = m.generate_content("test")
+            gemini_test_result = f"ok: {res.text.strip()[:40]}"
+    except Exception as e:
+        gemini_test_result = f"error: {str(e)}"
+
+    return {
+        "status": "healthy",
+        "llm_provider": settings.LLM_PROVIDER,
+        "has_gemini_key": gemini_key_set,
+        "gemini_key_preview": key_preview,
+        "gemini_test": gemini_test_result,
+        "total_products": prod_cnt,
+        "total_document_chunks": chunk_cnt,
+        "gemini_model": settings.GEMINI_MODEL
+    }
+
 @app.post("/api/sync-supabase")
 def trigger_supabase_sync():
     """Manual sync trigger endpoint for Frontend UI."""

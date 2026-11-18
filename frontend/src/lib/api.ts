@@ -2,11 +2,12 @@
 
 const DEFAULT_ENDPOINTS = [
   process.env.NEXT_PUBLIC_API_URL,
+  "https://prawira-ai-agent.onrender.com/api",
   "http://localhost:8000/api",
   "http://localhost:8001/api",
 ].filter(Boolean) as string[];
 
-let activeBaseUrl = DEFAULT_ENDPOINTS[0] || "http://localhost:8000/api";
+let activeBaseUrl = DEFAULT_ENDPOINTS[0] || "https://prawira-ai-agent.onrender.com/api";
 
 async function fetchWithFallback(endpoint: string, options?: RequestInit): Promise<Response> {
   // Try active first
