@@ -451,11 +451,12 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
     # -------------------------------------------------------------
     # 4. INVENTORY STOCK SEARCH
     # -------------------------------------------------------------
-    is_stock_query = any(k in msg_lower for k in ["stok", "stock", "ada", "ready", "harga", "sisa", "rak", "tersedia", "beli", "cek"])
+    is_sop_query = any(k in msg_lower for k in ["sop", "simpan", "penyimpanan", "suhu", "lembab", "kelembaban", "garansi", "retur", "rusak", "jamur", "klaim", "unboxing"])
+    is_stock_query = any(k in msg_lower for k in ["stok", "stock", "ada", "ready", "harga", "sisa", "rak", "tersedia", "beli", "cek"]) and not is_sop_query
     terms_to_check = []
     if product_targets:
         terms_to_check = product_targets
-    elif is_stock_query or queried_fake_brand:
+    elif (is_stock_query or queried_fake_brand) and not is_sop_query:
         stopwords = {
             "cek", "stok", "stock", "apakah", "ada", "berapa", "sisa", "harga", 
             "di", "gudang", "toko", "ya", "tolong", "bisa", "info", "minta", 
@@ -527,7 +528,12 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
     # -------------------------------------------------------------
     # 6. ASSEMBLE CONTENT
     # -------------------------------------------------------------
-    if rec_text:
+    is_sop_query = any(k in msg_lower for k in ["sop", "simpan", "penyimpanan", "suhu", "lembab", "kelembaban", "garansi", "retur", "rusak", "jamur", "klaim", "unboxing"])
+
+    if is_sop_query and chunks:
+        doc_info = "\n\n".join([f"> *\"{ch['content'][:320]}...\"*\n> — [Sumber: **{ch['document_name']}**, Hal. {ch['page_number']}]" for ch in chunks[:2]])
+        answers.append(f"📄 **Berdasarkan Dokumen SOP Resmi Prawira Tobacco:**\n\n{doc_info}\n\n*Jika Anda memerlukan bantuan lebih lanjut mengenai SOP atau klaim retur, silakan hubungi CS resmi Prawira Tobacco di WhatsApp 083132001855.*")
+    elif rec_text:
         answers.insert(0, rec_text)
     elif stock_items_found and not is_rec:
         stock_summary = "\n".join([
@@ -535,7 +541,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             for it in stock_items_found
         ])
         answers.insert(0, f"📦 **Ketersediaan Stok di Gudang / Supabase:**\n{stock_summary}")
-    elif queried_fake_brand or (failed_search_term and not stock_items_found and not is_rec):
+    elif queried_fake_brand or (failed_search_term and not stock_items_found and not is_rec and not is_sop_query):
         searched_label = queried_fake_brand[0] if queried_fake_brand else failed_search_term
         searched_label = searched_label.title()
         alt_info = ""
@@ -548,9 +554,6 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             f"Prawira Tobacco adalah spesialis tembakau linting (*tingwe*) artisan dan aksesoris resmi, bukan rokok pabrikan umum.{alt_info}\n\n"
             f"Silakan periksa daftar 24 varian produk resmi kami di tab **Katalog Supabase**."
         ))
-    elif chunks and any(k in msg_lower for k in ["sop", "simpan", "suhu", "lembab", "garansi", "retur", "rusak", "jamur"]):
-        doc_info = "\n\n".join([f"> *\"{ch['content'][:280]}...\"*\n> — [Sumber: **{ch['document_name']}**, Hal. {ch['page_number']}]" for ch in chunks[:2]])
-        answers.append(f"📄 **Berdasarkan Dokumen SOP Resmi Prawira Tobacco:**\n{doc_info}")
     elif not answers:
         answers.append(
             "Halo! Ada yang bisa saya bantu mengenai produk **Prawira Tobacco**?\n\n"
@@ -563,7 +566,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
 
     return {
         "answer": "\n\n".join(answers),
-        "citations": citations if any(k in msg_lower for k in ["sop", "simpan", "suhu", "garansi", "retur"]) else [],
+        "citations": citations if (is_sop_query or any(k in msg_lower for k in ["sop", "simpan", "suhu", "garansi", "retur"])) else [],
         "executed_tools": executed_tools,
         "provider": "Prawira Tobacco Smart Engine"
     }
