@@ -46,17 +46,30 @@ KATALOG & PETA PROFIL RASA RESMI PRAWIRA TOBACCO (SYNC SUPABASE):
 
 ATURAN KETAT ANTI-HALUSINASI & INTEGRITAS TOKO:
 1. HANYA rekomendasikan varian tembakau dan aksesoris yang tercantum dalam katalog resmi Supabase di atas. DILARANG KERAS mengarang merek atau varian fiktif yang tidak ada di toko kami.
-2. PERTANYAAN DI LUAR KONTEKS / OFF-TOPIC (UJI ANTI-HALUSINASI):
+2. ATURAN JUMLAH REKOMENDASI (CARDINALITY STRICT RULES):
+   - REKOMENDASI TEPAT 1 PRODUK:
+     Jika pengguna meminta 1 rekomendasi (contoh frasa: "rekomendasikan 1", "pilihin satu", "kasih 1 saja yang paling enak", "1 varian terbaik", "cuma satu", "satu saja", "minta 1"):
+     * Anda WAJIB HANYA MEMILIH DAN MEREKOMENDASIKAN TEPAT 1 (SATU) PRODUK.
+     * DILARANG KERAS memberikan daftar berisi 2 produk atau lebih jika pengguna hanya meminta 1.
+     * Berikan penjelasan detail mengenai profil rasa, harga, keunggulan varian tersebut, dan panggil tool `check_inventory_stock` HANYA untuk 1 produk tersebut (satu kali pemanggilan).
+   - REKOMENDASI DENGAN JUMLAH TERTENTU (N PRODUK):
+     Jika pengguna meminta sejumlah N produk (contoh: "beri saya 2 rekomendasi", "kasih 3 varian", "sebutkan 4"):
+     * Anda WAJIB memberikan TEPAT N produk sesuai jumlah yang diminta (tidak boleh kurang atau lebih).
+     * Panggil tool `check_inventory_stock` untuk produk-produk yang Anda sebutkan.
+   - REKOMENDASI TANPA MENYEBUTKAN JUMLAH:
+     Jika pengguna tidak menyebutkan jumlah spesifik (contoh: "rekomendasi tembakau manis dong", "ada rekomendasi untuk pemula?"):
+     * Berikan 2 sampai 3 rekomendasi terbaik secara ringkas, rapi, dan terstruktur.
+3. PERTANYAAN DI LUAR KONTEKS / OFF-TOPIC (UJI ANTI-HALUSINASI):
    - Jika pengguna menanyakan hal di luar produk tembakau, aksesoris, atau SOP toko Prawira Tobacco (contoh: tiket pesawat, tiket kereta api, resep masakan, cuaca, politik, saham/crypto, koding, dsb.), Anda WAJIB MENOLAK SECARA JUJUR DAN SOPAN.
    - Jawab dengan jelas: "Maaf, informasi tersebut tidak ditemukan dalam dokumen SOP atau Katalog resmi Prawira Tobacco. Sebagai asisten resmi Prawira Tobacco, saya hanya melayani konsultasi produk tembakau linting (tingwe), aksesoris linting, ketersediaan stok, dan SOP toko kami."
    - JANGAN PERNAH mengarang jawaban fiktif dan DILARANG KERAS memanggil tool WhatsApp untuk pertanyaan di luar konteks toko!
-3. PRODUK TIDAK TERDAFTAR / ROKOK BATANGAN PABRIKAN:
+4. PRODUK TIDAK TERDAFTAR / ROKOK BATANGAN PABRIKAN:
    - Jika pengguna menanyakan rokok batangan pabrikan umum (seperti Marlboro, Djarum Super, Sampoerna Mild, Gudang Garam Filter) atau produk yang tidak ada di Supabase:
      Jelaskan bahwa Prawira Tobacco khusus spesialis tembakau linting (tingwe) artisan dan aksesoris resmi, bukan rokok pabrikan siap hisap.
      Tawarkan alternatif varian tingwe resmi kami yang memiliki kemiripan profil rasa (misal: Marlboro -> Linting Marlong; Djarum/Kretek -> Linting Surya atau Magnum Premium; Mild -> Linting Mild).
-4. REKOMENDASI & STOK: Jika pelanggan menanyakan rekomendasi rasa atau menanyakan ketersediaan produk resmi, pilihkan varian di atas lalu WAJIB panggil tool `check_inventory_stock` menggunakan nama produk spesifik (contoh: search_term='Melon', search_term='Surya', search_term='Whiskey') untuk memeriksa ketersediaan stok real-time di Supabase.
-5. DISPATCH WHATSAPP: HANYA panggil tool `send_whatsapp_action` jika pengguna secara EKSPLISIT meminta mengirimkan ringkasan / pesanan produk tembakau ke WhatsApp atau menyebutkan nomor HP (contoh: 083132001855, 628...). DILARANG KERAS memanggil tool WhatsApp jika tidak ada permintaan kirim ke WhatsApp yang jelas.
-6. SOP & GARANSI: Untuk pertanyaan tentang cara menyimpan tembakau (RH 65-70%, wadah kedap) atau garansi retur (2x24 jam lampirkan video unboxing utuh), rujuk dokumen SOP resmi dengan sitasi [Sumber: Nama_File.pdf | Hal. X]. Layanan CS WhatsApp resmi Prawira adalah 083132001855.
+5. REKOMENDASI & STOK: Jika pelanggan menanyakan rekomendasi rasa atau menanyakan ketersediaan produk resmi, pilihkan varian sesuai aturan jumlah di atas lalu WAJIB panggil tool `check_inventory_stock` menggunakan nama produk spesifik (contoh: search_term='Melon', search_term='Surya', search_term='Whiskey') untuk memeriksa ketersediaan stok real-time di Supabase.
+6. DISPATCH WHATSAPP: HANYA panggil tool `send_whatsapp_action` jika pengguna secara EKSPLISIT meminta mengirimkan ringkasan / pesanan produk tembakau ke WhatsApp atau menyebutkan nomor HP (contoh: 083132001855, 628...). DILARANG KERAS memanggil tool WhatsApp jika tidak ada permintaan kirim ke WhatsApp yang jelas.
+7. SOP & GARANSI: Untuk pertanyaan tentang cara menyimpan tembakau (RH 65-70%, wadah kedap) atau garansi retur (2x24 jam lampirkan video unboxing utuh), rujuk dokumen SOP resmi dengan sitasi [Sumber: Nama_File.pdf | Hal. X]. Layanan CS WhatsApp resmi Prawira adalah 083132001855.
 """
 
 def run_agent_turn(db: Session, user_message: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
@@ -239,6 +252,75 @@ def _execute_gemini_agent(db: Session, user_message: str, system_prompt: str, ci
 
     raise last_exc or RuntimeError("All Gemini candidate models failed.")
 
+FLAVOR_CATALOG = {
+    "manis": [
+        {"name": "Linting Melon Ice", "search": "Melon", "price": "Rp 25.000 / pack", "desc": "Karakter manis buah melon segar berpadu sensasi dingin menthol sejuk"},
+        {"name": "Linting Strawberry", "search": "Strawberry", "price": "Rp 25.000 / pack", "desc": "Manis fruity segar khas buah strawberry pilihan alami"},
+        {"name": "Linting Cappucino", "search": "Cappucino", "price": "Rp 25.000 / pack", "desc": "Manis legit creamy aroma kopi cappucino hangat"},
+        {"name": "Purple Ice Burst", "search": "Purple", "price": "Rp 22.000 / pack", "desc": "Rasa manis segar anggur/berry dengan sensasi dingin ice burst"},
+        {"name": "Coklat Ice Premium", "search": "Coklat", "price": "Rp 22.000 / pack", "desc": "Varian tembakau coklat manis legit dengan sensasi dingin menthol"}
+    ],
+    "dingin": [
+        {"name": "Barrack Whiskey Ice", "search": "Whiskey", "price": "Rp 22.000 / pack", "desc": "Varian favorit sensasi dingin segar berpadu aroma whiskey unik"},
+        {"name": "Linting Melon Ice", "search": "Melon", "price": "Rp 25.000 / pack", "desc": "Sensasi dingin buah melon yang manis dan menyegarkan tenggorokan"},
+        {"name": "Purple Ice Burst", "search": "Purple", "price": "Rp 22.000 / pack", "desc": "Sensasi anggur berry segar dengan ice burst dingin menyegarkan"},
+        {"name": "Coklat Ice Premium", "search": "Coklat", "price": "Rp 22.000 / pack", "desc": "Tembakau rasa coklat berpadu sensasi mint sejuk"}
+    ],
+    "pemula": [
+        {"name": "Linting Mild", "search": "Mild", "price": "Rp 23.000 / pack", "desc": "Tarikan sangat ringan, halus, dan bersih, sangat bersahabat bagi pemula"},
+        {"name": "Sampurna Premium", "search": "Sampurna", "price": "Rp 30.000 / pack", "desc": "Racikan halus premium aroma rempah wangi pilihan"},
+        {"name": "Barrack Soju", "search": "Soju", "price": "Rp 45.000 / pack", "desc": "Tembakau linting Golden Virginia 50 gram impor aroma halus istimewa"},
+        {"name": "Barrack Bayote", "search": "Bayote", "price": "Rp 45.000 / pack", "desc": "Tembakau rasa khas Bayote tarikan pas dan seimbang"}
+    ],
+    "kretek": [
+        {"name": "Linting Surya", "search": "Surya", "price": "Rp 23.000 / pack", "desc": "Karakter aroma madu cengkeh tebal, gurih mantap khas karakter Surya"},
+        {"name": "Linting Samsu", "search": "Samsu", "price": "Rp 23.000 / pack", "desc": "Karakter klasik tajam dan nikmat, racikan legenda tingwe tradisional"},
+        {"name": "Linting Marlong", "search": "Marlong", "price": "Rp 23.000 / pack", "desc": "Karakter American blend gurih padat khas Marlboro"},
+        {"name": "Magnum Premium", "search": "Magnum", "price": "Rp 30.000 / pack", "desc": "Tembakau kretek premium tarikan padat berbobot"}
+    ],
+    "general": [
+        {"name": "Linting Melon Ice", "search": "Melon", "price": "Rp 25.000 / pack", "desc": "Varian rasa manis segar berpadu menthol terfavorit"},
+        {"name": "Linting Surya", "search": "Surya", "price": "Rp 23.000 / pack", "desc": "Kretek gurih tebal aroma madu cengkeh pilihan"},
+        {"name": "Barrack Whiskey Ice", "search": "Whiskey", "price": "Rp 22.000 / pack", "desc": "Sensasi dingin segar dengan sentuhan aroma whiskey"},
+        {"name": "Linting Mild", "search": "Mild", "price": "Rp 23.000 / pack", "desc": "Tarikan ringan halus cocok untuk harian pemula"}
+    ]
+}
+
+def _extract_requested_count(text: str) -> Optional[int]:
+    """
+    Extracts the user's requested number of recommendations (1, 2, 3, etc.)
+    with sanitization for phone numbers, prices, and hours.
+    """
+    msg_clean = text.lower()
+    # Remove phone numbers, prices, timestamps, percentages
+    msg_clean = re.sub(r'(08\d{8,11}|628\d{8,11})', ' ', msg_clean)
+    msg_clean = re.sub(r'\b\d{4,}\b', ' ', msg_clean)
+    msg_clean = re.sub(r'\b2x24\b|\b24\s*jam\b|\b50\s*gram\b|\b\d+%', ' ', msg_clean)
+
+    # 1. Multi-count checks
+    if re.search(r'\b(2|dua)\s*(varian|produk|rekomendasi|macam|biji|opsi|buah|item)?\b', msg_clean):
+        return 2
+    if re.search(r'\b(3|tiga)\s*(varian|produk|rekomendasi|macam|biji|opsi|buah|item)?\b', msg_clean):
+        return 3
+    if re.search(r'\b(4|empat)\s*(varian|produk|rekomendasi|macam|biji|opsi|buah)?\b', msg_clean):
+        return 4
+    if re.search(r'\b(5|lima)\s*(varian|produk|rekomendasi|macam|biji|opsi|buah)?\b', msg_clean):
+        return 5
+
+    # 2. Single item indicators
+    single_indicators = [
+        r'\b(1|satu)\s*(varian|produk|rekomendasi|macam|biji|opsi|buah|item|saja|aja)?\b',
+        r'\b(pilihin|pilihkan|rekomendasikan|kasih|minta|beri)\s+(1|satu)\b',
+        r'\b(hanya|cuma)\s+(1|satu)\b',
+        r'\b(1|satu)\s+saja\b',
+        r'\b(1|satu)\s+terbaik\b'
+    ]
+    for pattern in single_indicators:
+        if re.search(pattern, msg_clean):
+            return 1
+
+    return None
+
 def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Dict], citations: List[Dict]) -> Dict[str, Any]:
     """
     High-intelligence consultative agent engine with strict anti-hallucination guardrails.
@@ -306,58 +388,65 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
                 break
 
     # -------------------------------------------------------------
-    # 3. DETECT TASTE RECOMMENDATION INTENT
+    # 3. DETECT TASTE RECOMMENDATION INTENT & CARDINALITY
     # -------------------------------------------------------------
     is_rec = any(k in msg_lower for k in [
         "rekomendasi", "saran", "enak", "cocok", "pemula", "manis", "dingin", 
-        "ice", "menthol", "kretek", "mild", "buah", "gurih", "varian apa", "beli apa"
+        "ice", "menthol", "kretek", "mild", "buah", "gurih", "varian apa", "beli apa",
+        "pilihin", "pilihkan"
     ])
+    req_count = _extract_requested_count(msg_lower)
     product_targets = []
     rec_text = ""
 
-    if "manis" in msg_lower:
-        product_targets = ["Melon", "Strawberry"]
-        rec_text = (
-            "🍃 **Rekomendasi Varian Tembakau Rasa Manis Prawira Tobacco (Sync Supabase):**\n\n"
-            "1. **Linting Melon Ice** — Karakter manis buah melon segar berpadu sensasi dingin menthol sejuk (Rp 25.000 / pack).\n"
-            "2. **Linting Strawberry** — Manis fruity segar khas buah strawberry pilihan alami (Rp 25.000 / pack).\n"
-            "3. **Linting Cappucino** — Manis legit creamy aroma kopi cappucino hangat (Rp 25.000 / pack).\n"
-            "4. **Coklat Ice Premium** — Varian tembakau coklat manis legit dengan sensasi dingin menthol (Rp 22.000 / pack)."
-        )
+    category_items = []
+    cat_title = ""
+    if "manis" in msg_lower or "buah" in msg_lower or "kopi" in msg_lower or "coklat" in msg_lower:
+        category_items = FLAVOR_CATALOG["manis"]
+        cat_title = "Rasa Manis, Buah & Kopi"
     elif any(k in msg_lower for k in ["dingin", "ice", "menthol", "segar"]):
-        product_targets = ["Whiskey", "Melon"]
-        rec_text = (
-            "❄️ **Rekomendasi Varian Dingin & Menthol (Ice Series - Sync Supabase):**\n\n"
-            "1. **Barrack Whiskey Ice** — Varian favorit sensasi dingin segar berpadu aroma whiskey unik (Rp 22.000 / pack).\n"
-            "2. **Linting Melon Ice** — Sensasi dingin buah melon yang manis dan menyegarkan tenggorokan (Rp 25.000 / pack).\n"
-            "3. **Purple Ice Burst** — Sensasi anggur berry segar dengan ice burst dingin menyegarkan (Rp 22.000 / pack)."
-        )
+        category_items = FLAVOR_CATALOG["dingin"]
+        cat_title = "Dingin & Menthol (Ice Series)"
     elif any(k in msg_lower for k in ["pemula", "mild", "halus", "ringan"]):
-        product_targets = ["Mild", "Soju"]
-        rec_text = (
-            "🌿 **Rekomendasi untuk Pemula & Penggemar Rasa Halus (Mild - Sync Supabase):**\n\n"
-            "1. **Linting Mild** — Tarikan sangat ringan, halus, dan bersih, sangat bersahabat bagi pemula (Rp 23.000 / pack).\n"
-            "2. **Sampurna Premium** — Racikan halus premium aroma rempah wangi pilihan (Rp 30.000 / pack).\n"
-            "3. **Barrack Soju** — Tembakau linting Golden Virginia 50 gram impor aroma halus istimewa (Rp 45.000 / pack)."
-        )
-    elif any(k in msg_lower for k in ["kretek", "gurih", "mantap", "tradisional", "tingwe"]):
-        product_targets = ["Surya", "Samsu"]
-        rec_text = (
-            "🔥 **Rekomendasi Kretek Nusantara Gurih & Mantap (Sync Supabase):**\n\n"
-            "1. **Linting Surya** — Karakter aroma madu cengkeh tebal, gurih mantap khas karakter Surya (Rp 23.000 / pack).\n"
-            "2. **Linting Samsu** — Karakter klasik tajam dan nikmat, racikan legenda tingwe tradisional (Rp 23.000 / pack).\n"
-            "3. **Linting Marlong** — Karakter American blend gurih padat khas Marlboro (Rp 23.000 / pack).\n"
-            "4. **Magnum Premium** — Tembakau kretek premium tarikan padat berbobot (Rp 30.000 / pack)."
-        )
+        category_items = FLAVOR_CATALOG["pemula"]
+        cat_title = "Mild & Ramah Pemula"
+    elif any(k in msg_lower for k in ["kretek", "gurih", "mantap", "tradisional", "tingwe", "cengkeh"]):
+        category_items = FLAVOR_CATALOG["kretek"]
+        cat_title = "Kretek Nusantara Gurih & Mantap"
     elif is_rec:
-        product_targets = ["Surya", "Melon"]
-        rec_text = (
-            "🍃 **Daftar Varian Terlaris Prawira Tobacco (Sync Supabase):**\n\n"
-            "- **Manis & Dingin:** Linting Melon Ice (Rp 25.000)\n"
-            "- **Kretek Gurih:** Linting Surya (Rp 23.000)\n"
-            "- **Sensasi Dingin:** Barrack Whiskey Ice (Rp 22.000)\n"
-            "- **Mild Halus:** Linting Mild (Rp 23.000)"
-        )
+        category_items = FLAVOR_CATALOG["general"]
+        cat_title = "Terlaris Prawira Tobacco"
+
+    if category_items:
+        if req_count == 1:
+            # User specifically asked for EXACTLY 1 recommendation
+            it = category_items[0]
+            product_targets = [it["search"]]
+            rec_text = (
+                f"🍃 **Rekomendasi 1 Varian Terbaik ({cat_title} - Prawira Tobacco):**\n\n"
+                f"Sesuai permintaan Anda untuk 1 pilihan terbaik, rekomendasi utama kami adalah:\n\n"
+                f"⭐ **{it['name']}** ({it['price']})\n"
+                f"- **Karakter & Profil Rasa:** {it['desc']}.\n"
+                f"- **Alasan Pemilihan:** Varian ini merupakan signature blend terlaris dengan rating kepuasan tertinggi untuk kategori {cat_title.lower()} di Prawira Tobacco.\n\n"
+                f"*Ketersediaan stok di sistem gudang Supabase telah diverifikasi langsung di bawah ini.*"
+            )
+        elif req_count and req_count > 1:
+            # User specifically asked for N recommendations
+            selected = category_items[:req_count]
+            product_targets = [it["search"] for it in selected]
+            lines = [f"🍃 **Rekomendasi {len(selected)} Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
+            for idx, it in enumerate(selected, 1):
+                lines.append(f"{idx}. **{it['name']}** — {it['desc']} ({it['price']}).")
+            lines.append("\n*Ketersediaan stok untuk seluruh varian di atas telah diverifikasi dengan sistem gudang Supabase.*")
+            rec_text = "\n".join(lines)
+        else:
+            # Unspecified count -> Provide top 2-3 recommendations
+            selected = category_items[:3]
+            product_targets = [it["search"] for it in selected[:2]]
+            lines = [f"🍃 **Rekomendasi Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
+            for idx, it in enumerate(selected, 1):
+                lines.append(f"{idx}. **{it['name']}** — {it['desc']} ({it['price']}).")
+            rec_text = "\n".join(lines)
 
     # -------------------------------------------------------------
     # 4. INVENTORY STOCK SEARCH
@@ -380,7 +469,8 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
     failed_search_term = None
 
     if terms_to_check:
-        for term in terms_to_check[:2]:
+        search_limit = 1 if req_count == 1 else (req_count if req_count else 2)
+        for term in terms_to_check[:search_limit]:
             stock_res = check_inventory_stock(db, search_term=term)
             if stock_res["found"] and stock_res["items"]:
                 executed_tools.append({

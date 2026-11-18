@@ -130,7 +130,8 @@ prawira-enterprise/
 │   ├── agent_tools.py                 # Definisi fungsi check_inventory_stock & send_whatsapp_action
 │   ├── agent_orchestrator.py          # Decision engine: Gemini tool calling & smart fallback
 │   ├── sync_supabase.py               # Modul sinkronisasi katalog langsung dari Supabase
-│   └── test_pipeline.py               # Unit & integration test otomatis (5/5 lulus)
+│   ├── test_pipeline.py               # Unit & integration test otomatis (5/5 lulus)
+│   └── test_recommendation_cardinality.py # Pengujian kepatuhan jumlah rekomendasi (1 vs N produk)
 │
 ├── frontend/                          # Antarmuka Dashboard (Next.js 15 App Router)
 │   ├── src/
