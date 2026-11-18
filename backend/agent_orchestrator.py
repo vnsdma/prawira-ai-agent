@@ -70,6 +70,7 @@ ATURAN KETAT ANTI-HALUSINASI & INTEGRITAS TOKO:
 5. REKOMENDASI & STOK: Jika pelanggan menanyakan rekomendasi rasa atau menanyakan ketersediaan produk resmi, pilihkan varian sesuai aturan jumlah di atas lalu WAJIB panggil tool `check_inventory_stock` menggunakan nama produk spesifik (contoh: search_term='Melon', search_term='Surya', search_term='Whiskey') untuk memeriksa ketersediaan stok real-time di Supabase.
 6. DISPATCH WHATSAPP: HANYA panggil tool `send_whatsapp_action` jika pengguna secara EKSPLISIT meminta mengirimkan ringkasan / pesanan produk tembakau ke WhatsApp atau menyebutkan nomor HP (contoh: 083132001855, 628...). DILARANG KERAS memanggil tool WhatsApp jika tidak ada permintaan kirim ke WhatsApp yang jelas.
 7. SOP & GARANSI: Untuk pertanyaan tentang cara menyimpan tembakau (RH 65-70%, wadah kedap) atau garansi retur (2x24 jam lampirkan video unboxing utuh), rujuk dokumen SOP resmi dengan sitasi [Sumber: Nama_File.pdf | Hal. X]. Layanan CS WhatsApp resmi Prawira adalah 083132001855.
+8. FORMAT & GAYA BAHASA: DILARANG KERAS MENGGUNAKAN EMOJI dalam seluruh jawaban Anda. Tuliskan jawaban dalam format teks yang bersih, formal, profesional, dan rapi tanpa simbol emoji apapun.
 """
 
 def run_agent_turn(db: Session, user_message: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
@@ -567,9 +568,9 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             it = category_items[0]
             product_targets = [it["search"]]
             rec_text = (
-                f"🍃 **Rekomendasi 1 Varian Terbaik ({cat_title} - Prawira Tobacco):**\n\n"
+                f"**Rekomendasi 1 Varian Terbaik ({cat_title} - Prawira Tobacco):**\n\n"
                 f"Sesuai permintaan Anda untuk 1 pilihan terbaik, rekomendasi utama kami adalah:\n\n"
-                f"⭐ **{it['name']}** ({it['price']})\n"
+                f"**{it['name']}** ({it['price']})\n"
                 f"- **Karakter & Profil Rasa:** {it['desc']}.\n"
                 f"- **Alasan Pemilihan:** Varian ini merupakan signature blend terlaris dengan rating kepuasan tertinggi untuk kategori {cat_title.lower()} di Prawira Tobacco.\n\n"
                 f"*Ketersediaan stok di sistem gudang Supabase telah diverifikasi langsung di bawah ini.*"
@@ -578,7 +579,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             # User specifically asked for N recommendations
             selected = category_items[:req_count]
             product_targets = [it["search"] for it in selected]
-            lines = [f"🍃 **Rekomendasi {len(selected)} Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
+            lines = [f"**Rekomendasi {len(selected)} Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
             for idx, it in enumerate(selected, 1):
                 lines.append(f"{idx}. **{it['name']}** — {it['desc']} ({it['price']}).")
             lines.append("\n*Ketersediaan stok untuk seluruh varian di atas telah diverifikasi dengan sistem gudang Supabase.*")
@@ -587,7 +588,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             # Unspecified count -> Provide top 2-3 recommendations
             selected = category_items[:3]
             product_targets = [it["search"] for it in selected[:2]]
-            lines = [f"🍃 **Rekomendasi Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
+            lines = [f"**Rekomendasi Varian Pilihan ({cat_title} - Prawira Tobacco):**\n"]
             for idx, it in enumerate(selected, 1):
                 lines.append(f"{idx}. **{it['name']}** — {it['desc']} ({it['price']}).")
             rec_text = "\n".join(lines)
@@ -665,7 +666,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             "result": wa_res
         })
         answers.append(
-            f"📲 **Ringkasan Berhasil Dikirim ke WhatsApp!**\n"
+            f"**Ringkasan Berhasil Dikirim ke WhatsApp:**\n"
             f"Pesan rekomendasi dan ketersediaan stok telah disiapkan untuk nomor **{detected_phone}**. Anda dapat langsung mengklik tombol aksi WhatsApp di bawah ini."
         )
 
@@ -676,7 +677,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
 
     if is_sop_query and chunks:
         doc_info = "\n\n".join([f"> *\"{ch['content'][:320]}...\"*\n> — [Sumber: **{ch['document_name']}**, Hal. {ch['page_number']}]" for ch in chunks[:2]])
-        answers.append(f"📄 **Berdasarkan Dokumen SOP Resmi Prawira Tobacco:**\n\n{doc_info}\n\n*Jika Anda memerlukan bantuan lebih lanjut mengenai SOP atau klaim retur, silakan hubungi CS resmi Prawira Tobacco di WhatsApp 083132001855.*")
+        answers.append(f"**Berdasarkan Dokumen SOP Resmi Prawira Tobacco:**\n\n{doc_info}\n\n*Jika Anda memerlukan bantuan lebih lanjut mengenai SOP atau klaim retur, silakan hubungi CS resmi Prawira Tobacco di WhatsApp 083132001855.*")
     elif rec_text:
         answers.insert(0, rec_text)
     elif stock_items_found and not is_rec:
@@ -684,7 +685,7 @@ def _execute_deterministic_agent(db: Session, user_message: str, chunks: List[Di
             f"- **{it['name']}** (SKU: `{it['sku']}`): Stok **{it['stock']} {it['unit']}** | Harga: **{it['formatted_price']}** | Lokasi: `{it['shelf_location']}` ({it['status']})"
             for it in stock_items_found
         ])
-        answers.insert(0, f"📦 **Ketersediaan Stok di Gudang / Supabase:**\n{stock_summary}")
+        answers.insert(0, f"**Ketersediaan Stok di Gudang / Supabase:**\n{stock_summary}")
     elif queried_fake_brand or (failed_search_term and not stock_items_found and not is_rec and not is_sop_query):
         searched_label = queried_fake_brand[0] if queried_fake_brand else failed_search_term
         searched_label = searched_label.title()

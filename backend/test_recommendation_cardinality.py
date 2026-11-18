@@ -86,7 +86,7 @@ def run_cardinality_tests():
         print(f"    Products recommended: {prod_count_single} | Stock check tools: {tools_single.count('check_inventory_stock')}")
         assert prod_count_single == 1, f"Expected 1 product, found {prod_count_single} in answer."
         assert tools_single.count("check_inventory_stock") == 1, "Expected exactly 1 stock check tool call."
-        assert "⭐ **Linting Melon Ice**" in ans_single, "Expected featured single card for Melon Ice."
+        assert "**Linting Melon Ice**" in ans_single, "Expected featured single card for Melon Ice."
 
         # Case B: 2 Recommendations Request
         print("  • Testing 2 Recommendations ('Beri saya 2 rekomendasi kretek')...")

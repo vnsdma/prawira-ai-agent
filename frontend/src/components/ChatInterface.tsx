@@ -76,7 +76,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     {
       id: "welcome-msg",
       sender: "agent",
-      text: "Selamat datang di **Prawira Tobacco Enterprise Assistant**.\n\nSaya adalah asisten AI resmi yang siap membantu Anda dalam:\n1. 📄 **Konsultasi SOP & Panduan**: Menjawab pertanyaan seputar standar penyimpanan tembakau (RH 65-70%) dan kebijakan garansi retur resmi.\n2. 📦 **Pengecekan Stok Real-Time**: Memeriksa ketersediaan stok fisik dan harga dari 24 varian resmi di basis data Supabase Prawira Tobacco.\n3. 📲 **Tindakan WhatsApp**: Menyusun ringkasan pesanan dan menghubungkan langsung dengan staf toko kami via WhatsApp (+62 831-3200-1855).\n\nAda varian rasa atau informasi produk yang ingin Anda tanyakan?",
+      text: "Selamat datang di **Prawira Tobacco Enterprise Assistant**.\n\nSaya adalah asisten AI resmi yang siap membantu Anda dalam:\n1. **Konsultasi SOP & Panduan**: Menjawab pertanyaan seputar standar penyimpanan tembakau (RH 65-70%) dan kebijakan garansi retur resmi.\n2. **Pengecekan Stok Real-Time**: Memeriksa ketersediaan stok fisik dan harga dari 24 varian resmi di basis data Supabase Prawira Tobacco.\n3. **Tindakan WhatsApp**: Menyusun ringkasan pesanan dan menghubungkan langsung dengan staf toko kami via WhatsApp (+62 831-3200-1855).\n\nAda varian rasa atau informasi produk yang ingin Anda tanyakan?",
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
     }
   ]);
