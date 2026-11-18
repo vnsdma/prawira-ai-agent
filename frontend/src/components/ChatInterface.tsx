@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { 
   sendChatMessage, 
+  sendChatMessageStream,
   ChatResponse, 
   Citation, 
   ExecutedTool 
@@ -19,7 +20,8 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   Zap, 
-  Trash2
+  Trash2,
+  Activity
 } from "lucide-react";
 
 interface Message {
@@ -30,6 +32,8 @@ interface Message {
   tools?: ExecutedTool[];
   provider?: string;
   timestamp: string;
+  isStreaming?: boolean;
+  latencyMs?: number;
 }
 
 interface ChatInterfaceProps {
@@ -79,6 +83,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<string>("");
   const [openCitations, setOpenCitations] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +93,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, loading]);
+  }, [messages, loading, streamStatus]);
 
   useEffect(() => {
     if (initialPrompt) {
@@ -108,32 +113,98 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const agentMsgId = `agent-${Date.now()}`;
+    const initialAgentMessage: Message = {
+      id: agentMsgId,
+      sender: "agent",
+      text: "",
+      citations: [],
+      tools: [],
+      provider: "Prawira AI Agent",
+      timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, userMessage, initialAgentMessage]);
     setInput("");
     setLoading(true);
+    setStreamStatus("Menghubungkan ke Prawira AI Agent...");
 
     try {
-      const response = await sendChatMessage(query);
-      const agentMessage: Message = {
-        id: `agent-${Date.now()}`,
-        sender: "agent",
-        text: response.answer || "Maaf, tidak ada tanggapan yang dihasilkan.",
-        citations: response.citations || [],
-        tools: response.executed_tools || [],
-        provider: response.provider || "Gemini Flash Agent",
-        timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
-      };
-      setMessages((prev) => [...prev, agentMessage]);
+      await sendChatMessageStream(query, {
+        onStatus: (_stage, message) => {
+          setStreamStatus(message);
+        },
+        onCitations: (citations) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === agentMsgId ? { ...m, citations } : m))
+          );
+        },
+        onToolStart: (tool) => {
+          const toolLabel = tool === "check_inventory_stock" ? "Cek Stok Supabase" : "Aksi WhatsApp";
+          setStreamStatus(`⚡ Menjalankan ${toolLabel}...`);
+        },
+        onToolEnd: (tool, args, result) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === agentMsgId) {
+                const currentTools = m.tools || [];
+                return {
+                  ...m,
+                  tools: [...currentTools, { tool, arguments: args, result }]
+                };
+              }
+              return m;
+            })
+          );
+        },
+        onToken: (token) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId ? { ...m, text: m.text + token } : m
+            )
+          );
+        },
+        onDone: (provider, latencyMs) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId
+                ? { ...m, isStreaming: false, provider, latencyMs }
+                : m
+            )
+          );
+          setStreamStatus("");
+        },
+        onError: (err) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId
+                ? {
+                    ...m,
+                    isStreaming: false,
+                    text: m.text || `Terjadi kendala saat memproses: ${err.message || "Gagal streaming."}`
+                  }
+                : m
+            )
+          );
+          setStreamStatus("");
+        }
+      });
     } catch (err: any) {
-      const errorMessage: Message = {
-        id: `err-${Date.now()}`,
-        sender: "agent",
-        text: `Terjadi kendala saat menghubungkan ke AI Agent: ${err.message || "Pastikan backend server FastAPI aktif."}`,
-        timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === agentMsgId
+            ? {
+                ...m,
+                isStreaming: false,
+                text: m.text || `Koneksi terputus: ${err.message || "Pastikan backend aktif."}`
+              }
+            : m
+        )
+      );
     } finally {
       setLoading(false);
+      setStreamStatus("");
     }
   };
 
@@ -235,6 +306,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       {msg.provider}
                     </span>
                   )}
+                  {msg.latencyMs !== undefined && !isUser && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white/[0.03] text-emerald-400">
+                      {msg.latencyMs}ms
+                    </span>
+                  )}
+                  {msg.isStreaming && !isUser && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 animate-pulse flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                      Live Stream
+                    </span>
+                  )}
                 </div>
 
                 {/* Bubble Body */}
@@ -245,7 +327,22 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       : "glass-card text-slate-100 rounded-tl-sm border border-white/[0.08]"
                   }`}
                 >
-                  <MarkdownRenderer content={msg.text} isUser={isUser} />
+                  {/* Empty message streaming state with animated status */}
+                  {!msg.text && msg.isStreaming ? (
+                    <div className="flex items-center gap-2.5 text-slate-300 py-1 font-mono text-xs">
+                      <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+                      <span className="text-amber-200 font-medium animate-pulse">
+                        {streamStatus || "Asisten sedang menganalisis..."}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <MarkdownRenderer content={msg.text} isUser={isUser} />
+                      {msg.isStreaming && (
+                        <span className="inline-block w-2 h-4 ml-1 bg-amber-400 animate-pulse align-middle" />
+                      )}
+                    </div>
+                  )}
 
                   {/* Render Executed Tools if Any */}
                   {hasTools && (
@@ -312,22 +409,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           );
         })}
 
-        {/* Loading Indicator */}
-        {loading && (
-          <div className="flex items-start gap-3.5 mr-auto max-w-4xl">
-            <div className="w-9 h-9 rounded-2xl bg-[#1c2233] border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-              <Sparkles className="w-4 h-4 animate-spin text-amber-400" />
-            </div>
-            <div className="glass-card rounded-2xl rounded-tl-sm p-4 text-xs text-slate-300 border border-white/[0.08] flex items-center gap-3">
-              <span className="flex gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce"></span>
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce [animation-delay:0.2s]"></span>
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce [animation-delay:0.4s]"></span>
-              </span>
-              <span className="text-slate-400 font-mono text-[11px]">
-                Asisten sedang memeriksa dokumen & data stok...
-              </span>
-            </div>
+        {/* Real-time Status Floating Badge if Streaming */}
+        {loading && streamStatus && !messages.some(m => m.isStreaming && m.text) && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-950/60 border border-amber-500/30 text-xs font-mono text-amber-300 w-fit animate-pulse mr-auto">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>{streamStatus}</span>
           </div>
         )}
 

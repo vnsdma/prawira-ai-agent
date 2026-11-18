@@ -118,6 +118,150 @@ def run_agent_turn(db: Session, user_message: str, chat_history: Optional[List[D
     # 4. Deterministic Smart Fallback (No-Key / Safe Demo Mode)
     return _execute_deterministic_agent(db, user_message, relevant_chunks, citations)
 
+def run_agent_turn_stream(db: Session, user_message: str, chat_history: Optional[List[Dict[str, str]]] = None):
+    """
+    Generator yielding Server-Sent Events (SSE) in real-time:
+    - Status updates (RAG searching, tool calling)
+    - Citations
+    - Tool start & end events (live inventory / WhatsApp dispatch)
+    - Token-by-token streaming response
+    - Completion event with latency & provider metadata
+    """
+    import time
+    start_time = time.time()
+
+    # Step 1: Notify RAG retrieval status
+    yield f"data: {json.dumps({'type': 'status', 'stage': 'rag', 'message': 'Mencari dokumen SOP & Katalog resmi...'})}\n\n"
+    relevant_chunks = search_relevant_chunks(db, query=user_message, top_k=3, threshold=0.45)
+    
+    context_str = ""
+    citations = []
+    if relevant_chunks:
+        context_parts = []
+        for ch in relevant_chunks:
+            citation_label = f"{ch['document_name']} (Hal. {ch['page_number']})"
+            citations.append({
+                "document": ch["document_name"],
+                "page": ch["page_number"],
+                "similarity": ch["similarity"],
+                "preview": ch["content"][:160] + "..."
+            })
+            context_parts.append(f"--- DOKUMEN: {citation_label} ---\n{ch['content']}")
+        context_str = "\n\n".join(context_parts)
+        yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+    else:
+        context_str = "TIDAK ADA DOKUMEN YANG RELEVAN DENGAN PERTANYAAN INI."
+
+    full_system_prompt = f"{SYSTEM_PROMPT}\n\n=== KONTEKS DOKUMEN RESMI ===\n{context_str}\n================================"
+
+    # Step 2: Try Gemini Streaming
+    if settings.LLM_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
+        try:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'message': 'Menganalisis permintaan dengan Google Gemini...'})}\n\n"
+            import google.generativeai as gai
+            gai.configure(api_key=settings.GEMINI_API_KEY)
+
+            def check_inventory_stock_tool(search_term: str) -> str:
+                return json.dumps(check_inventory_stock(db, search_term=search_term), ensure_ascii=False)
+
+            def send_whatsapp_action_tool(phone_number: str, message_body: str) -> str:
+                return json.dumps(send_whatsapp_action(phone_number=phone_number, message_body=message_body), ensure_ascii=False)
+
+            candidate_models = [
+                settings.GEMINI_MODEL,
+                "gemini-flash-lite-latest",
+                "gemini-flash-latest",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash"
+            ]
+            unique_models = []
+            for m in candidate_models:
+                if m and m not in unique_models:
+                    unique_models.append(m)
+
+            stream_succeeded = False
+            for m_name in unique_models:
+                formatted_name = m_name if m_name.startswith("models/") else f"models/{m_name}"
+                try:
+                    model = gai.GenerativeModel(
+                        model_name=formatted_name,
+                        system_instruction=full_system_prompt,
+                        tools=[check_inventory_stock_tool, send_whatsapp_action_tool]
+                    )
+                    chat = model.start_chat()
+                    initial_response = chat.send_message(user_message)
+                    
+                    candidates = initial_response.candidates
+                    if candidates and candidates[0].content and candidates[0].content.parts:
+                        parts = candidates[0].content.parts
+                        func_calls = [p.function_call for p in parts if hasattr(p, 'function_call') and p.function_call]
+                        
+                        if func_calls:
+                            for fc in func_calls:
+                                fn_name = fc.name
+                                fn_args = dict(fc.args)
+                                clean_name = "check_inventory_stock" if "stock" in fn_name else "send_whatsapp_action"
+                                yield f"data: {json.dumps({'type': 'tool_start', 'tool': clean_name, 'arguments': fn_args})}\n\n"
+                                
+                                if clean_name == "check_inventory_stock":
+                                    tool_result = check_inventory_stock(db, **fn_args)
+                                else:
+                                    tool_result = send_whatsapp_action(**fn_args)
+                                    
+                                yield f"data: {json.dumps({'type': 'tool_end', 'tool': clean_name, 'arguments': fn_args, 'result': tool_result})}\n\n"
+                                
+                                streamed_resp = chat.send_message(
+                                    gai.protos.Content(
+                                        parts=[
+                                            gai.protos.Part(
+                                                function_response=gai.protos.FunctionResponse(
+                                                    name=fn_name,
+                                                    response={'result': json.dumps(tool_result, ensure_ascii=False)}
+                                                )
+                                            )
+                                        ]
+                                    ),
+                                    stream=True
+                                )
+                                for chunk in streamed_resp:
+                                    if chunk.text:
+                                        yield f"data: {json.dumps({'type': 'token', 'content': chunk.text})}\n\n"
+                        else:
+                            full_text = initial_response.text
+                            words = re.findall(r'\S+\s*', full_text)
+                            for w in words:
+                                yield f"data: {json.dumps({'type': 'token', 'content': w})}\n\n"
+                                time.sleep(0.01)
+
+                    elapsed_ms = round((time.time() - start_time) * 1000)
+                    yield f"data: {json.dumps({'type': 'done', 'provider': f'Gemini ({m_name})', 'latency_ms': elapsed_ms})}\n\n"
+                    stream_succeeded = True
+                    break
+                except Exception as ex:
+                    logger.warning(f"Gemini stream candidate {m_name} failed: {ex}. Trying next...")
+
+            if stream_succeeded:
+                return
+        except Exception as e:
+            logger.error(f"Gemini streaming failed: {e}. Falling back to deterministic stream.")
+
+    # Step 3: Deterministic Fallback Streaming
+    yield f"data: {json.dumps({'type': 'status', 'stage': 'fallback', 'message': 'Menghubungkan ke Prawira Smart Engine...'})}\n\n"
+    fallback_res = _execute_deterministic_agent(db, user_message, relevant_chunks, citations)
+
+    for tool_exec in fallback_res.get("executed_tools", []):
+        yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_exec['tool'], 'arguments': tool_exec.get('arguments', {})})}\n\n"
+        yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_exec['tool'], 'arguments': tool_exec.get('arguments', {}), 'result': tool_exec.get('result', {})})}\n\n"
+
+    answer_text = fallback_res.get("answer", "")
+    words = re.findall(r'\S+\s*', answer_text)
+    for w in words:
+        yield f"data: {json.dumps({'type': 'token', 'content': w})}\n\n"
+        time.sleep(0.015)
+
+    elapsed_ms = round((time.time() - start_time) * 1000)
+    yield f"data: {json.dumps({'type': 'done', 'provider': 'Prawira Tobacco Smart Engine', 'latency_ms': elapsed_ms})}\n\n"
+
 def _execute_openai_agent(db: Session, user_message: str, system_prompt: str, citations: List[Dict]) -> Dict[str, Any]:
     from openai import OpenAI
     client = OpenAI(api_key=settings.OPENAI_API_KEY)

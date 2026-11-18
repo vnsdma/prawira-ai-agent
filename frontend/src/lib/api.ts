@@ -99,6 +99,117 @@ export interface ChatResponse {
   provider: string;
 }
 
+export interface StreamEvent {
+  type: "status" | "citations" | "tool_start" | "tool_end" | "token" | "done" | "error";
+  message?: string;
+  stage?: string;
+  citations?: Citation[];
+  tool?: string;
+  arguments?: Record<string, any>;
+  result?: Record<string, any>;
+  content?: string;
+  provider?: string;
+  latency_ms?: number;
+}
+
+export async function sendChatMessageStream(
+  message: string,
+  callbacks: {
+    onStatus?: (stage: string, message: string) => void;
+    onCitations?: (citations: Citation[]) => void;
+    onToolStart?: (tool: string, args: Record<string, any>) => void;
+    onToolEnd?: (tool: string, args: Record<string, any>, result: Record<string, any>) => void;
+    onToken?: (token: string) => void;
+    onDone?: (provider: string, latencyMs?: number) => void;
+    onError?: (error: Error) => void;
+  }
+): Promise<void> {
+  const tryUrl = (base: string) => `${base.replace(/\/$/, "")}/chat/stream`;
+
+  let response: Response | null = null;
+  const targetEndpoints = [activeBaseUrl, ...DEFAULT_ENDPOINTS.filter(b => b !== activeBaseUrl)];
+
+  for (const base of targetEndpoints) {
+    try {
+      const res = await fetch(tryUrl(base), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (res.ok && res.body) {
+        activeBaseUrl = base;
+        response = res;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Graceful fallback to non-streaming endpoint if streaming fails or not supported
+  if (!response || !response.body) {
+    try {
+      const nonStreamRes = await sendChatMessage(message);
+      if (nonStreamRes.citations && callbacks.onCitations) callbacks.onCitations(nonStreamRes.citations);
+      if (nonStreamRes.executed_tools && callbacks.onToolEnd) {
+        for (const t of nonStreamRes.executed_tools) {
+          callbacks.onToolEnd(t.tool, t.arguments, t.result);
+        }
+      }
+      if (callbacks.onToken) callbacks.onToken(nonStreamRes.answer);
+      if (callbacks.onDone) callbacks.onDone(nonStreamRes.provider);
+      return;
+    } catch (err: any) {
+      if (callbacks.onError) callbacks.onError(err);
+      throw err;
+    }
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const jsonStr = trimmed.replace(/^data:\s*/, "");
+        if (!jsonStr) continue;
+
+        try {
+          const event: StreamEvent = JSON.parse(jsonStr);
+          if (event.type === "status" && callbacks.onStatus) {
+            callbacks.onStatus(event.stage || "", event.message || "");
+          } else if (event.type === "citations" && callbacks.onCitations && event.citations) {
+            callbacks.onCitations(event.citations);
+          } else if (event.type === "tool_start" && callbacks.onToolStart && event.tool) {
+            callbacks.onToolStart(event.tool, event.arguments || {});
+          } else if (event.type === "tool_end" && callbacks.onToolEnd && event.tool) {
+            callbacks.onToolEnd(event.tool, event.arguments || {}, event.result || {});
+          } else if (event.type === "token" && callbacks.onToken && event.content !== undefined) {
+            callbacks.onToken(event.content);
+          } else if (event.type === "done" && callbacks.onDone) {
+            callbacks.onDone(event.provider || "Gemini Flash Agent", event.latency_ms);
+          }
+        } catch {
+          // ignore corrupted SSE frame
+        }
+      }
+    }
+  } catch (err: any) {
+    if (callbacks.onError) callbacks.onError(err);
+    throw err;
+  }
+}
+
 export async function fetchHealth(): Promise<HealthInfo> {
   const res = await fetchWithFallback("/health");
   if (!res.ok) throw new Error("Backend offline");

@@ -2,6 +2,7 @@ import os
 import logging
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,7 +11,7 @@ from sqlalchemy import func
 from config import settings
 from database import init_db, get_db, Product, DocumentChunk
 from rag_engine import ingest_pdf_to_db
-from agent_orchestrator import run_agent_turn
+from agent_orchestrator import run_agent_turn, run_agent_turn_stream
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -165,6 +166,29 @@ def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Chat turn error: {e}")
         raise HTTPException(status_code=500, detail=f"Terjadi kesalahan pada agent: {str(e)}")
+
+@app.post("/api/chat/stream")
+def chat_stream_endpoint(req: ChatRequest, db: Session = Depends(get_db)):
+    """
+    Real-time Server-Sent Events (SSE) streaming endpoint:
+    Streams RAG citations, live tool execution events, and token-by-token answer generation.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
+
+    try:
+        return StreamingResponse(
+            run_agent_turn_stream(db, user_message=req.message),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Chat stream endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=f"Terjadi kesalahan streaming: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
