@@ -43,29 +43,25 @@ interface ChatInterfaceProps {
 
 const FREQUENT_CONSULTATION_CHIPS = [
   {
+    label: "Rekomendasi 1 Rasa Manis",
+    prompt: "Rekomendasikan 1 tembakau rasa manis yang paling enak dan cek ketersediaan stoknya",
+  },
+  {
     label: "Cek Stok Linting Surya",
-    prompt: "Cek ketersediaan stok fisik Tembakau Linting Surya dan lokasinya di rak gudang",
+    prompt: "Cek ketersediaan stok fisik Linting Surya di gudang Supabase",
   },
   {
-    label: "SOP Kelembaban & Suhu",
-    prompt: "Berapa suhu dan kadar kelembaban optimal untuk penyimpanan tembakau menurut SOP resmi?",
+    label: "Varian Dingin Ice Menthol",
+    prompt: "Tampilkan rekomendasi varian tembakau dingin ice menthol",
   },
   {
-    label: "Kebijakan Garansi & Retur",
-    prompt: "Bagaimana syarat dan alur klaim garansi retur tembakau yang rusak menurut SOP?",
+    label: "SOP Penyimpanan",
+    prompt: "Berapa standar suhu dan kadar kelembaban optimal penyimpanan tembakau menurut SOP resmi?",
   },
   {
-    label: "Rekomendasi Varian Mild (Pemula)",
-    prompt: "Saya baru belajar melinting (tingwe), ada rekomendasi varian mild yang tarikannya halus dan cocok untuk pemula?",
+    label: "Panduan Cara Melinting",
+    prompt: "Bagaimana cara melinting tembakau tingwe bagi pemula dan perlengkapan apa saja yang dibutuhkan?",
   },
-  {
-    label: "Varian Manis Buah & Kopi",
-    prompt: "Saya mencari tembakau rasa manis buah atau aroma kopi, varian apa saja yang tersedia di Prawira Tobacco?",
-  },
-  {
-    label: "Kirim Ringkasan Pesanan ke WA",
-    prompt: "Tolong siapkan ringkasan pesanan varian tembakau pilihan ke nomor WhatsApp toko 083132001855",
-  }
 ];
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -76,7 +72,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     {
       id: "welcome-msg",
       sender: "agent",
-      text: "Selamat datang di **Prawira Tobacco Enterprise Assistant**.\n\nSaya adalah asisten AI resmi yang siap membantu Anda dalam:\n1. **Konsultasi SOP & Panduan**: Menjawab pertanyaan seputar standar penyimpanan tembakau (RH 65-70%) dan kebijakan garansi retur resmi.\n2. **Pengecekan Stok Real-Time**: Memeriksa ketersediaan stok fisik dan harga dari 24 varian resmi di basis data Supabase Prawira Tobacco.\n3. **Tindakan WhatsApp**: Menyusun ringkasan pesanan dan menghubungkan langsung dengan staf toko kami via WhatsApp (+62 831-3200-1855).\n\nAda varian rasa atau informasi produk yang ingin Anda tanyakan?",
+      text: "Selamat datang di **Prawira Tobacco Enterprise**.\n\nSaya adalah asisten AI resmi yang siap membantu Anda dalam:\n- **Konsultasi Rasa & Rekomendasi**: Menemukan varian tembakau sesuai profil selera Anda (manis buah, dingin ice, kretek gurih, atau mild halus).\n- **Pengecekan Stok Real-Time**: Memeriksa ketersediaan stok fisik dan harga dari 24 varian resmi di basis data Supabase.\n- **Pemesanan via WhatsApp**: Menyiapkan ringkasan pesanan ke WhatsApp resmi (+62 831-3200-1855).\n- **SOP Toko**: Informasi standar penyimpanan dan garansi retur resmi.\n\nSilakan tanyakan varian rasa atau informasi yang ingin Anda ketahui.",
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
     }
   ]);
@@ -142,7 +138,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         },
         onToolStart: (tool) => {
           const toolLabel = tool === "check_inventory_stock" ? "Cek Stok Supabase" : "Aksi WhatsApp";
-          setStreamStatus(`⚡ Menjalankan ${toolLabel}...`);
+          setStreamStatus(`Memeriksa ${toolLabel}...`);
         },
         onToolEnd: (tool, args, result) => {
           setMessages((prev) =>
@@ -232,33 +228,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#080a0f]">
-      {/* Top Telemetry & Guardrails Bar */}
-      <div className="px-4 sm:px-6 py-2.5 border-b border-white/[0.06] bg-[#0c0f17] flex items-center justify-between gap-3 text-xs shrink-0 overflow-x-auto">
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span className="font-semibold text-slate-200">Anti-Halusinasi & Data Resmi:</span>
-            <span className="text-emerald-300 font-mono text-[11px] px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60">
-              TERVERIFIKASI (24 SKU Supabase)
-            </span>
-          </div>
-
-          <div className="hidden md:flex items-center gap-1.5 text-slate-400">
-            <span>&bull;</span>
-            <span>RAG Cosine Threshold:</span>
-            <span className="font-mono text-amber-300">0.45</span>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-1.5 text-slate-400">
-            <span>&bull;</span>
-            <span>Hotline WhatsApp Toko:</span>
-            <span className="font-mono text-emerald-300">+62 831-3200-1855</span>
-          </div>
+      {/* Clean Session Status Strip */}
+      <div className="px-4 sm:px-8 py-2.5 border-b border-white/[0.06] bg-[#0c0f17] flex items-center justify-between text-xs shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span className="font-medium text-slate-300">Asisten Konsultasi Sommelier</span>
+          <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">&bull; 24 Varian Supabase Aktif</span>
         </div>
 
         <button
           onClick={clearChat}
-          className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-red-400 transition-colors shrink-0 px-2 py-1 rounded-lg hover:bg-white/[0.04]"
+          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-red-400 transition-colors px-2.5 py-1 rounded-lg hover:bg-white/[0.04]"
           title="Bersihkan Percakapan"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -266,8 +246,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </button>
       </div>
 
-      {/* Main Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6">
+      {/* Main Messages Scroll Area (Centered & Ergonomic) */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-6 max-w-4xl mx-auto w-full">
         {messages.map((msg) => {
           const isUser = msg.sender === "user";
           const hasCitations = msg.citations && msg.citations.length > 0;

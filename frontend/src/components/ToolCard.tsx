@@ -39,7 +39,7 @@ export const ToolCard: React.FC<ToolCardProps> = ({ tool }) => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-semibold tracking-wide uppercase text-amber-400">
-                  Tool: check_inventory_stock
+                  Status Stok Gudang Real-Time
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/50">
                   {sourceLabel}
@@ -146,7 +146,7 @@ export const ToolCard: React.FC<ToolCardProps> = ({ tool }) => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-semibold tracking-wide uppercase text-emerald-400">
-                  Tool: send_whatsapp_action
+                  Ringkasan Pesanan WhatsApp
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
                   {provider}
